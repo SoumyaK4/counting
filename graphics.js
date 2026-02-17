@@ -1,15 +1,42 @@
+let boards;
+let board;
+let score = 0;
+let started = false;
+let timer = 0;
+let maxTime = 0;
+let seconds = '';
+let boardSize = '9';
+let gameMode = 'normal';
+let correct = '';
+let failed = false;
+let startTime = 0;
+let R, D, sx, sy, bx, by, wx, wy;
+let halfStrokeWeight;
+
 function preload() {
     seconds = prompt('Seconds per board: (leave empty for no timer)', window.localStorage.seconds || '')
-    seconds = round(parseInt(seconds))
-    if (!seconds || seconds <= 0) {seconds = Infinity}
-    maxTime = seconds * 1000
-    if (seconds == Infinity) seconds = ''
-    window.localStorage.seconds = seconds
+    seconds = (seconds === '' || seconds === null) ? Infinity : round(parseInt(seconds))
+    if (isNaN(seconds) || seconds <= 0) {seconds = Infinity}
+    maxTime = (seconds === Infinity) ? Infinity : seconds * 1000
+    window.localStorage.seconds = (seconds === Infinity) ? '' : seconds
+
+    boardSize = prompt('Board size: 9, 13, 19, or random', window.localStorage.boardSize || '9')
+    if (!['9', '13', '19', 'random'].includes(boardSize)) boardSize = '9'
+    window.localStorage.boardSize = boardSize
+
+    gameMode = prompt('Mode: normal or hardcore', window.localStorage.gameMode || 'normal')
+    if (!['normal', 'hardcore'].includes(gameMode)) gameMode = 'normal'
+    window.localStorage.gameMode = gameMode
 }
 
 function setup() {
+    boards = {
+        "9": boards9,
+        "13": boards13,
+        "19": boards19
+    };
+
     createCanvas().mouseClicked(handleClick)
-    windowResized()
     
     ellipseMode(RADIUS)
     strokeCap(PROJECT)
@@ -21,26 +48,31 @@ function setup() {
 }
 
 function windowResized() {
-    R = floor(min(window.innerWidth/10, window.innerHeight/12)/2)-1
+    let bw = (board && board.width) ? board.width : (parseInt(boardSize) || 9)
+    let bh = (board && board.height) ? board.height : (parseInt(boardSize) || 9)
+
+    R = floor(min(window.innerWidth/(bw + 1), window.innerHeight/(bh + 3))/2)-1
     D = 2 * R
-    width = 10 * D
-    height = 12 * D
+    let w = (bw + 1) * D
+    let h = (bh + 3) * D
     halfStrokeWeight = ceil(D/70)
     strokeWeight(2 * halfStrokeWeight)
 
-    sx = width/2
+    sx = w/2
     sy = 1.5*R
-    bx = width/2 - 2*D
-    by = height - 1.5*R
-    wx = width/2 + 2*D
-    wy = height - 1.5*R
+    bx = w/2 - 2*D
+    by = h - 1.5*R
+    wx = w/2 + 2*D
+    wy = h - 1.5*R
     
-    resizeCanvas(width, height)
+    resizeCanvas(w, h)
 }
 
 function draw() {
     clear()
     
+    if (!board) return;
+
     push()
     stroke(0)
     translate(D, 2*D)
@@ -67,36 +99,33 @@ function draw() {
     textSize(R)
     if (dist(mouseX, mouseY, 2*D, 0.5*R) < 1.5*R) textSize(R * 1.1)
     fill('black')
-    text('restart', 2*D, R)
+    textAlign(LEFT, CENTER)
+    text('restart', 2*D, 1.2*R)
 
     push()
     fill('white')
     textSize(D)
-    
+    textAlign(CENTER, CENTER)
     textFont('courier')    
-    text(score, width/2, R)
-    
+    text(score, width/2, 1.2*R)
     pop()
 
     textSize(R)
     if (dist(mouseX, mouseY, width - 2*D, 0.5*R) < 1.5*R) textSize(R * 1.1)
     fill('black')
-    text('about', width - 2*D, R)
+    textAlign(RIGHT, CENTER)
+    text('about', width - 2*D, 1.2*R)
     pop()
 
     push()
-
     let dx = map(timer, 0, maxTime, 0, width/2 - D)
-    
     fill(255)
     stroke('white')
     strokeCap(ROUND)
-    if (timer > 0) line(width/2 - dx, D, width/2 + dx, D)
+    if (timer > 0 && maxTime !== Infinity) line(width/2 - dx, D, width/2 + dx, D)
     pop()
 
-    
     if (timer > 0) {
-        
         textAlign(CENTER, CENTER)
 
         fill('black')
@@ -120,36 +149,57 @@ function draw() {
             textSize(D)
         }
         text('white', wx, wy)
-        if (started) {
+        if (started && maxTime !== Infinity) {
             timer -= deltaTime
         }
-        if (timer <= 0) {
+        if (timer <= 0 && maxTime !== Infinity) {
             document.bgColor = "royalblue"
         }
     } else {
+        textAlign(CENTER, CENTER)
         textSize(R)
         noStroke()
         fill(0, 200)
         let plurality = (score == 1) ? 'board' : 'boards'
-        if (seconds == '') {
-            text(`Game over!\nYou solved ${score} ${plurality}.`, width/2, by)
-        } else {
-            text(`Game over!\nYou solved ${score} ${plurality} in ${seconds}s per board.`, width/2, by)
-        }
-        
-    }
+        let displaySeconds = (seconds === Infinity) ? '' : seconds
+        let hsKey = `highscore_${boardSize}_${gameMode}`
+        let highscore = window.localStorage.getItem(hsKey) || 0
+        let modeText = gameMode === 'hardcore' ? ' (hardcore)' : ''
+        let sizeText = boardSize === 'random' ? 'random size' : boardSize + 'x' + boardSize
 
+        let msg = `Game over!\nYou solved ${score} ${plurality} [${sizeText}${modeText}].`
+        if (displaySeconds !== '') msg += `\n${displaySeconds}s per board.`
+        msg += `\nHigh score: ${highscore}`
+
+        text(msg, width/2, by)
+    }
 }
 
 function loadBoard() {
-	let textBoard = random(boards).split('\n').map(row => row.split(' '))
+    let size = boardSize
+    if (size === 'random') {
+        let availableSizes = Object.keys(boards).filter(s => boards[s].length > 0)
+        size = random(availableSizes)
+    }
+
+    let boardList = boards[size]
+    if (!boardList || boardList.length === 0) {
+        alert("No boards found for size " + size + ". Falling back to 9x9.")
+        boardList = boards['9']
+    }
+
+    let boardObj = random(boardList)
+	let textBoard = boardObj.map.trim().split('\n').map(row => row.split(' '))
     board = {width: textBoard[0].length, height: textBoard.length}
+    board.lead = boardObj.lead
 
 	let flipX = random() < 0.5
 	let flipY = random() < 0.5
 	let transpose = (board.width == board.height) && (random() < 0.5)
     let invert = random() < 0.5
-    correct = invert ? "white" : "black"
+
+    let mapWinner = (board.lead === null || board.lead >= 0) ? "black" : "white";
+    correct = invert ? (mapWinner === "black" ? "white" : "black") : mapWinner;
 
 	for (let x = 0; x < board.width; x ++) {
         board[x] = {}
@@ -160,6 +210,9 @@ function loadBoard() {
 			board[x][y] = {'O':1,'X':-1,'.':0}[textBoard[b][a]] * (-1)**invert
         }
     }
+
+    windowResized()
+
     failed = false
     document.bgColor = 'seagreen'
     startTime = millis()
@@ -167,12 +220,14 @@ function loadBoard() {
 }
 
 function handleClick() {
-    if (dist(mouseX, mouseY, 2*D, R) < R) {
+    if (dist(mouseX, mouseY, 2*D, 1.2*R) < R) {
         setup()
+        return
     }
 
-    if (dist(mouseX, mouseY, width - 2*D, R) < R) {
-        window.location.href = "https://count.antontobi.com/about.html"
+    if (dist(mouseX, mouseY, width - 2*D, 1.2*R) < R) {
+        window.location.href = "about.html"
+        return
     }
     if (timer > 0) {
         if (dist(mouseX, mouseY, bx, by) < D) {
@@ -189,8 +244,22 @@ function handleClick() {
 function submit(guess) {
     started = true
     if (guess === correct) {
+        if (gameMode === 'hardcore') {
+            let leadGuess = prompt(`How many points is ${guess} leading by?`)
+            if (leadGuess === null) return; // Cancelled
+            if (board.lead !== null && parseInt(leadGuess) !== Math.abs(board.lead)) {
+                timer = -1
+                document.bgColor = 'crimson'
+                return
+            }
+        }
         score ++
-        maxTime -= 1000
+        let hsKey = `highscore_${boardSize}_${gameMode}`
+        let currentHS = parseInt(window.localStorage.getItem(hsKey) || '0')
+        if (score > currentHS) {
+            window.localStorage.setItem(hsKey, score)
+        }
+        if (maxTime !== Infinity) maxTime -= 1000
         loadBoard()
     } else {
         if (!failed) {
@@ -206,7 +275,6 @@ function keyPressed() {
         if (keyCode === LEFT_ARROW)  submit('black')
         if (keyCode === RIGHT_ARROW) submit('white')
     }
-    
 }
 
 function mouseReleased() {

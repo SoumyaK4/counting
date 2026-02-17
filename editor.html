@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Count! Board Editor</title>
+    <script src="p5.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; display: flex; flex-direction: column; align-items: center; background: #fefefe; color: #333; }
+        h1 { margin-bottom: 30px; }
+        .container { display: flex; gap: 40px; max-width: 1200px; width: 100%; justify-content: center; align-items: flex-start; }
+        .controls { flex: 1; display: flex; flex-direction: column; gap: 15px; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); border: 1px solid #eee; }
+        #canvas-container { background: #2e8b57; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; }
+        textarea { width: 100%; height: 80px; font-family: 'Courier New', monospace; padding: 10px; border-radius: 6px; border: 1px solid #ccc; resize: vertical; box-sizing: border-box; }
+        .output-container { position: relative; }
+        .output { background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 8px; font-family: 'Courier New', monospace; white-space: pre; overflow-x: auto; font-size: 13px; line-height: 1.4; border: 1px solid #111; }
+        label { font-weight: 600; color: #555; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+        input[type="number"] { padding: 10px; border-radius: 6px; border: 1px solid #ccc; width: 100px; }
+        button { padding: 12px 20px; cursor: pointer; background: #2e8b57; color: white; border: none; border-radius: 6px; font-weight: bold; transition: background 0.2s; }
+        button:hover { background: #246d44; }
+        button.secondary { background: #555; }
+        button.secondary:hover { background: #444; }
+        .size-buttons { display: flex; gap: 10px; }
+        .size-buttons button { flex: 1; background: #eee; color: #333; }
+        .size-buttons button.active { background: #2e8b57; color: white; }
+        .hint { font-size: 12px; color: #888; margin-top: -10px; }
+    </style>
+</head>
+<body>
+    <h1>Count! Board Editor</h1>
+    <div class="container">
+        <div id="canvas-container"></div>
+        <div class="controls">
+            <label>Board Size</label>
+            <div class="size-buttons">
+                <button onclick="setSize(9)" id="btn-9" class="active">9x9</button>
+                <button onclick="setSize(13)" id="btn-13">13x13</button>
+                <button onclick="setSize(19)" id="btn-19">19x19</button>
+            </div>
+
+            <label>Board String (Flat)</label>
+            <textarea id="flat-string" placeholder="Paste flat string here... e.g. . . X O . . ." oninput="fromFlatString()"></textarea>
+            <p class="hint">Updates automatically when you click the board.</p>
+
+            <label>Lead (Black Advantage)</label>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <input type="number" id="lead-input" value="0" oninput="updateOutput()">
+                <span class="hint">Positive = Black wins, Negative = White wins</span>
+            </div>
+
+            <button class="secondary" onclick="clearBoard()">Clear Board</button>
+
+            <label>Code Snippet</label>
+            <div class="output-container">
+                <div id="code-output" class="output"></div>
+            </div>
+            <button onclick="copyCode()">Copy to Clipboard</button>
+        </div>
+    </div>
+
+    <script>
+        let size = 9;
+        let board = [];
+        let R, D;
+        let canvas;
+
+        function setup() {
+            canvas = createCanvas(500, 500);
+            canvas.parent('canvas-container');
+            initBoard();
+            updateDimensions();
+            // We don't use noLoop() because we want to handle mouse interaction naturally
+        }
+
+        function draw() {
+            background('#2e8b57');
+            drawBoard();
+        }
+
+        function initBoard() {
+            board = Array(size).fill().map(() => Array(size).fill('.'));
+            updateUI();
+        }
+
+        function updateDimensions() {
+            D = width / (size + 1);
+            R = D * 0.90; 
+        }
+
+        function setSize(s) {
+            size = s;
+            document.querySelectorAll('.size-buttons button').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + s).classList.add('active');
+            initBoard();
+            updateDimensions();
+        }
+
+        function drawBoard() {
+            stroke(0);
+            strokeWeight(1.5);
+
+            // Draw lines
+            for (let i = 0; i < size; i++) {
+                // Vertical
+                line((i + 1) * D, D, (i + 1) * D, size * D);
+                // Horizontal
+                line(D, (i + 1) * D, size * D, (i + 1) * D);
+            }
+
+            // Draw stones
+            noStroke();
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    let val = board[y][x];
+                    if (val === 'O') {
+                        fill(0);
+                        circle((x + 1) * D, (y + 1) * D, R);
+                    } else if (val === 'X') {
+                        fill(255);
+                        circle((x + 1) * D, (y + 1) * D, R);
+                    }
+                }
+            }
+
+            // Draw hover indicator
+            let gx = Math.round(mouseX / D) - 1;
+            let gy = Math.round(mouseY / D) - 1;
+            if (gx >= 0 && gx < size && gy >= 0 && gy < size) {
+                fill(255, 100);
+                circle((gx + 1) * D, (gy + 1) * D, R * 0.5);
+            }
+        }
+
+        function mousePressed() {
+            if (mouseX < 0 || mouseX > width || mouseY < 0 || mouseY > height) return;
+
+            let x = Math.round(mouseX / D) - 1;
+            let y = Math.round(mouseY / D) - 1;
+
+            if (x >= 0 && x < size && y >= 0 && y < size) {
+                if (board[y][x] === '.') board[y][x] = 'O';
+                else if (board[y][x] === 'O') board[y][x] = 'X';
+                else board[y][x] = '.';
+
+                updateUI();
+            }
+        }
+
+        function clearBoard() {
+            initBoard();
+        }
+
+        function updateUI() {
+            let flat = board.flat().join(' ');
+            document.getElementById('flat-string').value = flat;
+            updateOutput();
+        }
+
+        function fromFlatString() {
+            let s = document.getElementById('flat-string').value.trim();
+            if (!s) return;
+
+            if (s.startsWith('(') && s.includes(';')) {
+                parseSGF(s);
+                return;
+            }
+
+            let parts = s.split(/\s+/);
+
+            if (parts.length === 169 && size !== 13) setSize(13);
+            else if (parts.length === 361 && size !== 19) setSize(19);
+            else if (parts.length === 81 && size !== 9) setSize(9);
+
+            if (parts.length === size * size) {
+                for (let i = 0; i < parts.length; i++) {
+                    let x = i % size;
+                    let y = Math.floor(i / size);
+                    let v = parts[i].toUpperCase();
+                    board[y][x] = (v === 'O' || v === 'X') ? v : '.';
+                }
+                updateOutput();
+            }
+        }
+
+        function parseSGF(content) {
+            const sizeMatch = content.match(/SZ\[(\d+)\]/);
+            const sgfSize = sizeMatch ? parseInt(sizeMatch[1]) : 19;
+
+            if ([9, 13, 19].includes(sgfSize) && size !== sgfSize) {
+                setSize(sgfSize);
+            }
+
+            // Clear current board
+            for (let y = 0; y < size; y++) board[y].fill('.');
+
+            // Handle Setup tags
+            const abMatches = content.match(/AB(\[[a-z]{2}\])+/g);
+            if (abMatches) {
+                abMatches.forEach(m => {
+                    const coords = m.match(/[a-z]{2}/g);
+                    if (coords) coords.forEach(c => {
+                        const x = c.charCodeAt(0) - 97;
+                        const y = c.charCodeAt(1) - 97;
+                        if (x >= 0 && x < size && y >= 0 && y < size) board[y][x] = 'O';
+                    });
+                });
+            }
+
+            const awMatches = content.match(/AW(\[[a-z]{2}\])+/g);
+            if (awMatches) {
+                awMatches.forEach(m => {
+                    const coords = m.match(/[a-z]{2}/g);
+                    if (coords) coords.forEach(c => {
+                        const x = c.charCodeAt(0) - 97;
+                        const y = c.charCodeAt(1) - 97;
+                        if (x >= 0 && x < size && y >= 0 && y < size) board[y][x] = 'X';
+                    });
+                });
+            }
+
+            // Handle Move tags ;B[ee] or ;W[ge]
+            const moveRegex = /;([BW])\[([a-z]{0,2})\]/g;
+            let match;
+            while ((match = moveRegex.exec(content)) !== null) {
+                const color = match[1] === 'B' ? 'O' : 'X';
+                const coord = match[2];
+                if (coord.length === 2) {
+                    const x = coord.charCodeAt(0) - 97;
+                    const y = coord.charCodeAt(1) - 97;
+                    if (x >= 0 && x < size && y >= 0 && y < size) {
+                        playMove(x, y, color);
+                    }
+                }
+            }
+
+            // Extract Result
+            const reMatch = content.match(/RE\[([BW])\+([\d.]+)\]/);
+            if (reMatch) {
+                const winner = reMatch[1];
+                const margin = parseFloat(reMatch[2]);
+                document.getElementById('lead-input').value = (winner === 'B' ? 1 : -1) * Math.round(margin);
+            }
+
+            updateOutput();
+        }
+
+        function playMove(x, y, color) {
+            board[y][x] = color;
+            const opponent = color === 'O' ? 'X' : 'O';
+
+            // Check adjacent for captures
+            const neighbors = [[x+1, y], [x-1, y], [x, y+1], [x, y-1]];
+            neighbors.forEach(([nx, ny]) => {
+                if (nx >= 0 && nx < size && ny >= 0 && ny < size && board[ny][nx] === opponent) {
+                    if (!hasLiberties(nx, ny)) {
+                        captureGroup(nx, ny);
+                    }
+                }
+            });
+
+            if (!hasLiberties(x, y)) {
+                // Suicide or illegal move - usually shouldn't happen in valid SGF
+                // but we leave it for faithfulness to the file
+            }
+        }
+
+        function hasLiberties(x, y) {
+            const color = board[y][x];
+            const visited = new Set();
+            const stack = [[x, y]];
+            visited.add(`${x},${y}`);
+
+            while (stack.length > 0) {
+                const [cx, cy] = stack.pop();
+                const neighbors = [[cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]];
+                for (const [nx, ny] of neighbors) {
+                    if (nx >= 0 && nx < size && ny >= 0 && ny < size) {
+                        if (board[ny][nx] === '.') return true;
+                        if (board[ny][nx] === color && !visited.has(`${nx},${ny}`)) {
+                            visited.add(`${nx},${ny}`);
+                            stack.push([nx, ny]);
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        function captureGroup(x, y) {
+            const color = board[y][x];
+            const stack = [[x, y]];
+            board[y][x] = '.';
+
+            while (stack.length > 0) {
+                const [cx, cy] = stack.pop();
+                const neighbors = [[cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]];
+                for (const [nx, ny] of neighbors) {
+                    if (nx >= 0 && nx < size && ny >= 0 && ny < size && board[ny][nx] === color) {
+                        board[ny][nx] = '.';
+                        stack.push([nx, ny]);
+                    }
+                }
+            }
+        }
+
+        function updateOutput() {
+            let mapRows = [];
+            for (let y = 0; y < size; y++) {
+                mapRows.push(board[y].join(' '));
+            }
+            let mapStr = mapRows.join('\n');
+            let lead = document.getElementById('lead-input').value || 0;
+
+            let code = `    {
+      "map": \`
+${mapStr}
+\`.trim(),
+      "lead": ${lead}
+    }`;
+            document.getElementById('code-output').textContent = code;
+        }
+
+        function copyCode() {
+            let code = document.getElementById('code-output').textContent;
+            const el = document.createElement('textarea');
+            el.value = code;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            alert('Code snippet copied to clipboard!');
+        }
+    </script>
+</body>
+</html>
